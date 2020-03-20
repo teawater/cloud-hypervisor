@@ -26,6 +26,7 @@ use std::io;
 
 #[macro_use]
 mod device;
+pub mod balloon;
 pub mod block;
 mod console;
 mod iommu;
@@ -39,6 +40,7 @@ pub mod vsock;
 pub mod transport;
 pub mod vhost_user;
 
+pub use self::balloon::*;
 pub use self::block::*;
 pub use self::console::*;
 pub use self::device::*;
