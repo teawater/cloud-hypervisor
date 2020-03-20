@@ -503,6 +503,7 @@ mod unit_tests {
                     mergeable: false,
                     hotplug_method: HotplugMethod::Acpi,
                     hotplug_size: None,
+                    balloon: false,
                 },
                 kernel: None,
                 initramfs: None,

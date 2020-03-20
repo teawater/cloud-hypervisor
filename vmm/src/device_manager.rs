@@ -116,6 +116,9 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-iommu device
     CreateVirtioIommu(io::Error),
 
+    /// Cannot create virtio-balloon device
+    CreateVirtioBalloon(io::Error),
+
     /// Failed parsing disk image format
     DetectImageType(qcow::Error),
 
@@ -1039,6 +1042,9 @@ impl DeviceManager {
 
         devices.append(&mut self.make_virtio_mem_devices()?);
 
+        // Add virtio-balloon if required
+        devices.append(&mut self.make_virtio_balloon_devices()?);
+
         Ok(devices)
     }
 
@@ -1555,6 +1561,32 @@ impl DeviceManager {
             ));
 
             let migratable = Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn Migratable>>;
+            let id = migratable.lock().unwrap().id();
+            self.migratable_devices.insert(id, migratable);
+        }
+
+        Ok(devices)
+    }
+
+    fn make_virtio_balloon_devices(&mut self) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
+        let mut devices = Vec::new();
+
+        if self.config.lock().unwrap().memory.balloon {
+            let virtio_balloon_device = Arc::new(Mutex::new(
+                vm_virtio::Balloon::new().map_err(DeviceManagerError::CreateVirtioBalloon)?,
+            ));
+
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .set_balloon(virtio_balloon_device.clone());
+
+            devices.push((
+                Arc::clone(&virtio_balloon_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                false,
+            ));
+
+            let migratable = Arc::clone(&virtio_balloon_device) as Arc<Mutex<dyn Migratable>>;
             let id = migratable.lock().unwrap().id();
             self.migratable_devices.insert(id, migratable);
         }

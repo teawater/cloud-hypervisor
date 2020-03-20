@@ -422,6 +422,8 @@ pub struct MemoryConfig {
     pub hotplug_method: HotplugMethod,
     #[serde(default)]
     pub hotplug_size: Option<u64>,
+    #[serde(default)]
+    pub balloon: bool,
 }
 
 impl MemoryConfig {
@@ -432,7 +434,8 @@ impl MemoryConfig {
             .add("file")
             .add("mergeable")
             .add("hotplug_method")
-            .add("hotplug_size");
+            .add("hotplug_size")
+            .add("balloon");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
         let size = parser
@@ -454,6 +457,11 @@ impl MemoryConfig {
             .convert::<ByteSized>("hotplug_size")
             .map_err(Error::ParseMemory)?
             .map(|v| v.0);
+        let balloon = parser
+            .convert::<Toggle>("balloon")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(MemoryConfig {
             size,
@@ -461,6 +469,7 @@ impl MemoryConfig {
             mergeable,
             hotplug_method,
             hotplug_size,
+            balloon,
         })
     }
 }
@@ -473,6 +482,7 @@ impl Default for MemoryConfig {
             mergeable: false,
             hotplug_method: HotplugMethod::Acpi,
             hotplug_size: None,
+            balloon: false,
         }
     }
 }

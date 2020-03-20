@@ -55,6 +55,8 @@ pub struct MemoryManager {
     next_hotplug_slot: usize,
     pub virtiomem_region: Option<Arc<GuestRegionMmap>>,
     pub virtiomem_resize: Option<vm_virtio::Resize>,
+    balloon: Option<Arc<Mutex<vm_virtio::Balloon>>>,
+    balloon_size: u64,
 }
 
 #[derive(Debug)]
@@ -100,6 +102,9 @@ pub enum Error {
 
     /// Cannot create the system allocator
     CreateSystemAllocator,
+
+    /// Failed to virtio-balloon resize
+    VirtioBalloonResizeFail(vm_virtio::balloon::Error),
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -302,6 +307,8 @@ impl MemoryManager {
             next_hotplug_slot: 0,
             virtiomem_region: virtiomem_region.clone(),
             virtiomem_resize,
+            balloon: None,
+            balloon_size: 0u64,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -454,6 +461,10 @@ impl MemoryManager {
         Ok(region)
     }
 
+    pub fn set_balloon(&mut self, balloon: Arc<Mutex<vm_virtio::Balloon>>) {
+        self.balloon = Some(balloon);
+    }
+
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
     }
@@ -540,6 +551,19 @@ impl MemoryManager {
             resize.work(size).map_err(Error::VirtioMemResizeFail)?;
         } else {
             panic!("should not fail here");
+        }
+
+        Ok(())
+    }
+
+    pub fn balloon_resize(&mut self, size: u64) -> Result<(), Error> {
+        if let Some(balloon) = &self.balloon {
+            balloon
+                .lock()
+                .unwrap()
+                .resize(size)
+                .map_err(Error::VirtioBalloonResizeFail)?;
+            self.balloon_size = size;
         }
 
         Ok(())
