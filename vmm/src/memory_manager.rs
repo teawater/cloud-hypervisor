@@ -47,6 +47,8 @@ pub struct MemoryManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     current_ram: u64,
     next_hotplug_slot: usize,
+    balloon: Option<Arc<Mutex<vm_virtio::Balloon>>>,
+    balloon_size: u64,
 }
 
 #[derive(Debug)]
@@ -80,6 +82,9 @@ pub enum Error {
 
     /// Failed to set the user memory region.
     SetUserMemoryRegion(kvm_ioctls::Error),
+
+    /// Failed to virtio-balloon resize
+    VirtioBalloonResizeFail(vm_virtio::balloon::Error),
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -250,6 +255,8 @@ impl MemoryManager {
             allocator: allocator.clone(),
             current_ram: boot_ram,
             next_hotplug_slot: 0,
+            balloon: None,
+            balloon_size: 0u64,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -381,6 +388,10 @@ impl MemoryManager {
         Ok(())
     }
 
+    pub fn set_balloon(&mut self, balloon: Arc<Mutex<vm_virtio::Balloon>>) {
+        self.balloon = Some(balloon);
+    }
+
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
     }
@@ -453,14 +464,33 @@ impl MemoryManager {
         Ok(slot)
     }
 
-    pub fn resize(&mut self, desired_ram: u64) -> Result<bool, Error> {
-        if desired_ram > self.current_ram {
-            self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?;
-            self.current_ram = desired_ram;
-            Ok(true)
-        } else {
-            Ok(false)
+    pub fn balloon_resize(&mut self, size: u64) -> Result<(), Error> {
+        if let Some(balloon) = &self.balloon {
+            balloon
+                .lock()
+                .unwrap()
+                .resize(size)
+                .map_err(Error::VirtioBalloonResizeFail)?;
+            self.balloon_size = size;
         }
+
+        Ok(())
+    }
+
+    pub fn resize(&mut self, desired_ram: u64) -> Result<bool, Error> {
+        if desired_ram >= self.current_ram {
+            if self.balloon_size != 0 {
+                self.balloon_resize(0)?;
+            }
+            if desired_ram > self.current_ram {
+                self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?;
+                self.current_ram = desired_ram;
+                return Ok(true);
+            }
+        } else if desired_ram < self.current_ram {
+            self.balloon_resize(self.current_ram - desired_ram)?;
+        }
+        Ok(false)
     }
 }
 

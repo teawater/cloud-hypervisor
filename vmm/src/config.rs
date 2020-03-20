@@ -255,6 +255,8 @@ pub struct MemoryConfig {
     pub mergeable: bool,
     #[serde(default)]
     pub hotplug_size: Option<u64>,
+    #[serde(default)]
+    pub balloon: bool,
 }
 
 impl MemoryConfig {
@@ -267,6 +269,7 @@ impl MemoryConfig {
         let mut mergeable_str: &str = "";
         let mut backed = false;
         let mut hotplug_str: &str = "";
+        let mut balloon_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("size=") {
@@ -278,6 +281,8 @@ impl MemoryConfig {
                 mergeable_str = &param[10..];
             } else if param.starts_with("hotplug_size=") {
                 hotplug_str = &param[13..]
+            } else if param.starts_with("balloon=") {
+                balloon_str = &param[8..];
             }
         }
 
@@ -300,6 +305,7 @@ impl MemoryConfig {
             } else {
                 Some(parse_size(hotplug_str)?)
             },
+            balloon: parse_on_off(balloon_str)?,
         })
     }
 }
@@ -311,6 +317,7 @@ impl Default for MemoryConfig {
             file: None,
             mergeable: false,
             hotplug_size: None,
+            balloon: false,
         }
     }
 }
