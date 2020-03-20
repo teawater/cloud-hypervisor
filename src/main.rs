@@ -464,6 +464,7 @@ mod unit_tests {
                     file: None,
                     mergeable: false,
                     hotplug_size: None,
+                    balloon: false,
                 },
                 kernel: None,
                 cmdline: CmdlineConfig {
