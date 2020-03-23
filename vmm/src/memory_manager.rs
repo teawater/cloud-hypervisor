@@ -526,8 +526,7 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn resize(&mut self, desired_ram: u64) -> Result<bool, Error> {
-        let mut notify_hotplug = false;
+    pub fn resize(&mut self, desired_ram: u64) -> Result<(), Error> {
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
                 if desired_ram >= self.boot_ram {
@@ -539,11 +538,10 @@ impl MemoryManager {
                 if desired_ram >= self.current_ram {
                     self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?;
                     self.current_ram = desired_ram;
-                    notify_hotplug = true
                 }
             }
         }
-        Ok(notify_hotplug)
+        Ok(())
     }
 }
 
