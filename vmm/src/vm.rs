@@ -550,28 +550,30 @@ impl Vm {
         }
 
         if let Some(desired_memory) = desired_memory {
-            self.memory_manager
+            if self
+                .memory_manager
                 .lock()
                 .unwrap()
                 .resize(desired_memory)
-                .map_err(Error::MemoryManager)?;
+                .map_err(Error::MemoryManager)?
+            {
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .update_memory()
+                    .map_err(Error::DeviceManager)?;
 
-            let memory_config = &self.config.lock().unwrap().memory;
-            match memory_config.hotplug_method {
-                HotplugMethod::Acpi => {
-                    self.device_manager
-                        .lock()
-                        .unwrap()
-                        .update_memory()
-                        .map_err(Error::DeviceManager)?;
-
-                    self.device_manager
-                        .lock()
-                        .unwrap()
-                        .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
-                        .map_err(Error::DeviceManager)?;
+                let memory_config = &self.config.lock().unwrap().memory;
+                match memory_config.hotplug_method {
+                    HotplugMethod::Acpi => {
+                        self.device_manager
+                            .lock()
+                            .unwrap()
+                            .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
+                            .map_err(Error::DeviceManager)?;
+                    }
+                    HotplugMethod::VirtioMem => {}
                 }
-                HotplugMethod::VirtioMem => {}
             }
 
             // We update the VM config regardless of the actual guest resize operation
