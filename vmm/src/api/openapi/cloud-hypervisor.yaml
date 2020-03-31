@@ -364,6 +364,9 @@ components:
         hotplug_method:
           type: string
           default: "acpi"
+        balloon:
+          type: boolean
+          default: false
 
     KernelConfig:
       required:
