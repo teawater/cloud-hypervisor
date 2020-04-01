@@ -12,7 +12,6 @@ extern crate clap;
 use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
-use seccomp::SeccompLevel;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::{env, process};
@@ -293,7 +292,6 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         api_evt.try_clone().unwrap(),
         http_sender,
         api_request_receiver,
-        &SeccompLevel::None,
     ) {
         Ok(t) => t,
         Err(e) => {
