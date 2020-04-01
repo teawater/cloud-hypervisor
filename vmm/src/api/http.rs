@@ -8,7 +8,7 @@ use crate::api::http_endpoint::{
     VmResize, VmmPing, VmmShutdown,
 };
 use crate::api::{ApiRequest, VmAction};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::get_seccomp_filter;
 use crate::{Error, Result};
 use micro_http::{HttpServer, MediaType, Request, Response, StatusCode, Version};
 use seccomp::{SeccompFilter, SeccompLevel};
@@ -105,7 +105,7 @@ pub fn start_http_thread(
 
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter =
-        get_seccomp_filter(seccomp_level, Thread::Api).map_err(Error::CreateSeccompFilter)?;
+        get_seccomp_filter(seccomp_level).map_err(Error::CreateSeccompFilter)?;
 
     thread::Builder::new()
         .name("http-server".to_string())
