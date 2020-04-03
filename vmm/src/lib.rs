@@ -462,6 +462,19 @@ impl Vmm {
         }
     }
 
+    fn vm_balloon_resize(&mut self, resize_date: u64) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            if let Err(e) = vm.balloon_resize(resize_date) {
+                error!("Error when resizing VM balloon: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -665,6 +678,13 @@ impl Vmm {
                                     let response = self
                                         .vm_add_net(add_net_data.as_ref().clone())
                                         .map_err(ApiError::VmAddNet)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmBalloonResize(resize_data, sender) => {
+                                    let response = self
+                                        .vm_balloon_resize(resize_data)
+                                        .map_err(ApiError::VmBalloonResize)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }

@@ -4,6 +4,7 @@
 //
 
 use crate::api::http::EndpointHandler;
+use crate::api::vm_balloon_resize;
 use crate::api::{
     vm_add_device, vm_add_disk, vm_add_net, vm_add_pmem, vm_boot, vm_create, vm_delete, vm_info,
     vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore, vm_resume, vm_shutdown,
@@ -76,6 +77,9 @@ pub enum HttpError {
 
     /// Could not add a network device to a VM
     VmAddNet(ApiError),
+
+    /// Could access to balloon
+    VmmBalloon(ApiError),
 }
 
 fn error_response(error: HttpError, status: StatusCode) -> Response {
@@ -549,6 +553,45 @@ impl EndpointHandler for VmAddNet {
 
                         match vm_add_net(api_notifier, api_sender, Arc::new(vm_add_net_data))
                             .map_err(HttpError::VmAddNet)
+                        {
+                            Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                            Err(e) => error_response(e, StatusCode::InternalServerError),
+                        }
+                    }
+
+                    None => Response::new(Version::Http11, StatusCode::BadRequest),
+                }
+            }
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vm.add-net handler
+pub struct VmBalloon {}
+
+impl EndpointHandler for VmBalloon {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Put => {
+                match &req.body {
+                    Some(body) => {
+                        // Deserialize into a VmConfig
+                        let resize_data: u64 = match serde_json::from_slice(body.raw())
+                            .map_err(HttpError::SerdeJsonDeserialize)
+                        {
+                            Ok(config) => config,
+                            Err(e) => return error_response(e, StatusCode::BadRequest),
+                        };
+
+                        // Call vm_resize()
+                        match vm_balloon_resize(api_notifier, api_sender, resize_data)
+                            .map_err(HttpError::VmResize)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                             Err(e) => error_response(e, StatusCode::InternalServerError),

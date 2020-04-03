@@ -127,6 +127,9 @@ pub enum ApiError {
 
     /// The network device could not be added to the VM.
     VmAddNet(VmError),
+
+    /// The VM balloon could not be resized
+    VmBalloonResize(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -248,6 +251,9 @@ pub enum ApiRequest {
 
     /// Restore from a VM snapshot
     VmRestore(Arc<VmRestoreConfig>, Sender<ApiResponse>),
+
+    /// Resize the VM balloon.
+    VmBalloonResize(u64, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -519,6 +525,24 @@ pub fn vm_add_net(
     // Send the VM add-net request.
     api_sender
         .send(ApiRequest::VmAddNet(data, response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
+}
+
+pub fn vm_balloon_resize(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    resize_data: u64,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM resizing request.
+    api_sender
+        .send(ApiRequest::VmBalloonResize(resize_data, response_sender))
         .map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 

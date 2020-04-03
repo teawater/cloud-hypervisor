@@ -775,6 +775,14 @@ impl Vm {
         }
     }
 
+    pub fn balloon_resize(&mut self, resize_date: u64) -> Result<()> {
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .balloon_resize(resize_date)
+            .map_err(Error::MemoryManager)
+    }
+
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
         for signal in signals.forever() {
             match signal {

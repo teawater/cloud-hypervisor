@@ -203,6 +203,22 @@ paths:
         500:
           description: The new device could not be added to the VM instance.
 
+  /vm.balloon:
+    put:
+      summary: Resize the VM virtio balloon device
+      requestBody:
+        description: The target size for the balloon device
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmBalloonResize'
+        required: true
+      responses:
+        204:
+          description: The VM balloon device was successfully resized.
+        404:
+          description: The VM balloon device could not be resized.
+
   /vm.add-net:
     put:
       summary: Add a new network device to the VM
@@ -579,6 +595,14 @@ components:
       properties:
         id:
           type: string
+
+    VmBalloonResize:
+      type: object
+      properties:
+        size:
+          description: requested ballon size in bytes
+          type: integer
+          format: uint64
 
     VmSnapshotConfig:
       type: object
