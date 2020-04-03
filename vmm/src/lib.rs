@@ -440,9 +440,10 @@ impl Vmm {
         &mut self,
         desired_vcpus: Option<u8>,
         desired_ram: Option<u64>,
+        desired_balloon: Option<u64>,
     ) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.resize(desired_vcpus, desired_ram) {
+            if let Err(e) = vm.resize(desired_vcpus, desired_ram, desired_balloon) {
                 error!("Error when resizing VM: {:?}", e);
                 Err(e)
             } else {
@@ -710,6 +711,7 @@ impl Vmm {
                                         .vm_resize(
                                             resize_data.desired_vcpus,
                                             resize_data.desired_ram,
+                                            resize_data.desired_balloon,
                                         )
                                         .map_err(ApiError::VmResize)
                                         .map(|_| ApiResponsePayload::Empty);
