@@ -51,6 +51,8 @@ const DEFLATE_QUEUE_EVENT: DeviceEventT = 2;
 const KILL_EVENT: DeviceEventT = 3;
 // The device should be paused.
 const PAUSE_EVENT: DeviceEventT = 4;
+// The device should update memory.
+const UPDATE_MEMORY_EVENT: DeviceEventT = 5;
 
 // Page shift in the host.
 const PAGE_SHIFT: u32 = 12;
@@ -153,6 +155,8 @@ struct BalloonEpollHandler {
     config: Arc<Mutex<VirtioBalloonConfig>>,
     resize_receiver: VirtioBalloonResizeReceiver,
     queues: Vec<Queue>,
+    update_memory_evt: EventFd,
+    update_memory_rx: mpsc::Receiver<GuestMemoryAtomic<GuestMemoryMmap>>,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
@@ -180,6 +184,7 @@ impl BalloonEpollHandler {
             _ => return Err(Error::ProcessQueueWrongEvType(ev_type)),
         };
 
+        error!("process_queue {:?}", self.mem);
         let mut used_desc_heads = [0; QUEUE_SIZE as usize];
         let mut used_count = 0;
         let mem = self.mem.memory();
@@ -211,6 +216,13 @@ impl BalloonEpollHandler {
                 let pa = pfn << VIRTIO_BALLOON_PFN_SHIFT;
                 if let Some(region) = mem.find_region(GuestAddress(pa as u64)) {
                     let addr = region.as_ptr() as u64 + pa as u64 - region.start_addr().raw_value();
+                    error!(
+                        "addr {:?} {:?} {:?} {:?}",
+                        addr,
+                        region.as_ptr(),
+                        pa,
+                        region.start_addr().raw_value()
+                    );
                     let advice = match ev_type {
                         INFLATE_QUEUE_EVENT => libc::MADV_DONTNEED,
                         DEFLATE_QUEUE_EVENT => libc::MADV_WILLNEED,
@@ -289,6 +301,14 @@ impl BalloonEpollHandler {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.pause_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+
+        epoll::ctl(
+            epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.update_memory_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(UPDATE_MEMORY_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
 
@@ -376,6 +396,18 @@ impl BalloonEpollHandler {
                             )));
                         }
                     }
+                    UPDATE_MEMORY_EVENT => {
+                        if let Err(e) = self.update_memory_evt.read() {
+                            return Err(DeviceError::EpollHander(format!(
+                                "Failed to get update memory event: {:?}",
+                                e
+                            )));
+                        }
+                        // Fix me
+                        error!("update memory handler");
+                        let mem = self.update_memory_rx.recv().unwrap();
+                        self.mem = mem;
+                    }
                     KILL_EVENT => {
                         debug!("kill_evt received, stopping epoll loop");
                         break 'epoll;
@@ -406,6 +438,8 @@ impl BalloonEpollHandler {
 pub struct Balloon {
     id: String,
     resize: VirtioBalloonResize,
+    update_memory_evt: Option<EventFd>,
+    update_memory_tx: Option<mpsc::Sender<GuestMemoryAtomic<GuestMemoryMmap>>>,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     avail_features: u64,
@@ -427,6 +461,8 @@ impl Balloon {
         Ok(Balloon {
             id,
             resize: VirtioBalloonResize::new()?,
+            update_memory_evt: None,
+            update_memory_tx: None,
             kill_evt: None,
             pause_evt: None,
             avail_features,
@@ -514,6 +550,16 @@ impl VirtioDevice for Balloon {
             return Err(ActivateError::BadActivate);
         }
 
+        let (self_update_memory_evt, update_memory_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating update memory EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.update_memory_evt = Some(self_update_memory_evt);
+        let (tx, update_memory_rx) = mpsc::channel();
+        self.update_memory_tx = Some(tx);
+
         let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
             .and_then(|e| Ok((e.try_clone()?, e)))
             .map_err(|e| {
@@ -550,6 +596,8 @@ impl VirtioDevice for Balloon {
                 ActivateError::BadActivate
             })?,
             queues,
+            update_memory_evt,
+            update_memory_rx,
             mem,
             interrupt_cb,
             inflate_queue_evt: queue_evts.remove(0),
@@ -589,6 +637,20 @@ impl VirtioDevice for Balloon {
             self.interrupt_cb.take().unwrap(),
             self.queue_evts.take().unwrap(),
         ))
+    }
+
+    fn update_memory(&mut self, mem: &GuestMemoryMmap) -> std::result::Result<(), crate::Error> {
+        error!("update_memory {:?}", mem);
+        if let Some(update_memory_evt) = &self.update_memory_evt {
+            update_memory_evt
+                .write(1)
+                .map_err(crate::Error::EventfdError)?;
+        }
+        if let Some(tx) = &self.update_memory_tx {
+            // Fix me
+            tx.send(GuestMemoryAtomic::new(mem.clone())).unwrap();
+        }
+        Ok(())
     }
 }
 
