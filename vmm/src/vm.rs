@@ -743,6 +743,8 @@ impl Vm {
                 .unwrap()
                 .balloon_resize(desired_ram_w_balloon)
                 .map_err(Error::MemoryManager)?;
+            let balloon_size = self.config.lock().unwrap().memory.size - desired_ram_w_balloon;
+            self.config.lock().unwrap().memory.balloon_size = balloon_size;
         }
 
         Ok(())

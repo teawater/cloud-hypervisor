@@ -2319,8 +2319,11 @@ impl DeviceManager {
             let id = String::from(BALLOON_DEVICE_NAME);
 
             let virtio_balloon_device = Arc::new(Mutex::new(
-                vm_virtio::Balloon::new(id.clone())
-                    .map_err(DeviceManagerError::CreateVirtioBalloon)?,
+                vm_virtio::Balloon::new(
+                    id.clone(),
+                    self.config.lock().unwrap().memory.balloon_size,
+                )
+                .map_err(DeviceManagerError::CreateVirtioBalloon)?,
             ));
 
             self.memory_manager
