@@ -356,6 +356,8 @@ pub struct MemoryConfig {
     pub balloon: bool,
     #[serde(default)]
     pub balloon_size: u64,
+    #[serde(default)]
+    pub virtiomem_size: u64,
 }
 
 impl MemoryConfig {
@@ -417,6 +419,7 @@ impl MemoryConfig {
             hugepages,
             balloon,
             balloon_size: 0,
+            virtiomem_size: 0,
         })
     }
 }
@@ -433,6 +436,7 @@ impl Default for MemoryConfig {
             hugepages: false,
             balloon: false,
             balloon_size: 0,
+            virtiomem_size: 0,
         }
     }
 }
@@ -1951,6 +1955,7 @@ mod tests {
                 hugepages: false,
                 balloon: false,
                 balloon_size: 0,
+                virtiomem_size: 0,
             },
             kernel: Some(KernelConfig {
                 path: PathBuf::from("/path/to/kernel"),

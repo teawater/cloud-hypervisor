@@ -181,6 +181,36 @@ struct VirtioMemConfig {
 // Safe because it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioMemConfig {}
 
+fn virtio_mem_config_resize(config: &mut VirtioMemConfig, size: u64) -> result::Result<(), Error> {
+    if config.requested_size == size {
+        return Err(Error::ResizeInval(format!(
+            "Virtio-mem resize {} is same with current config.requested_size",
+            size
+        )));
+    } else if size > config.region_size {
+        let region_size = config.region_size;
+        return Err(Error::ResizeInval(format!(
+            "Virtio-mem resize {} is bigger than config.region_size {}",
+            size, region_size
+        )));
+    } else if size % (config.block_size as u64) != 0 {
+        let block_size = config.block_size;
+        return Err(Error::ResizeInval(format!(
+            "Virtio-mem resize {} is not aligned with config.block_size {}",
+            size, block_size
+        )));
+    }
+
+    config.requested_size = size;
+    let tmp_size = cmp::min(
+        config.region_size,
+        config.requested_size + VIRTIO_MEM_USABLE_EXTENT,
+    );
+    config.usable_region_size = cmp::max(config.usable_region_size, tmp_size);
+
+    Ok(())
+}
+
 struct Request {
     req: VirtioMemReq,
     status_addr: GuestAddress,
@@ -785,7 +815,12 @@ pub struct Mem {
 
 impl Mem {
     // Create a new virtio-mem device.
-    pub fn new(id: String, region: &Arc<GuestRegionMmap>, resize: Resize) -> io::Result<Mem> {
+    pub fn new(
+        id: String,
+        region: &Arc<GuestRegionMmap>,
+        resize: Resize,
+        size: u64,
+    ) -> io::Result<Mem> {
         let region_len = region.len();
 
         if region_len != region_len / VIRTIO_MEM_DEFAULT_BLOCK_SIZE * VIRTIO_MEM_DEFAULT_BLOCK_SIZE
@@ -810,6 +845,15 @@ impl Mem {
             config.region_size,
             config.requested_size + VIRTIO_MEM_USABLE_EXTENT,
         );
+
+        if size != 0 {
+            virtio_mem_config_resize(&mut config, size).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Virtio-mem resize {} got {:?}", size, e),
+                )
+            })?;
+        }
 
         let host_fd = if let Some(f_offset) = region.file_offset() {
             Some(f_offset.file().as_raw_fd())
