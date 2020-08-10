@@ -374,6 +374,8 @@ pub struct MemoryConfig {
     #[serde(default)]
     pub balloon_size: u64,
     #[serde(default)]
+    pub virtiomem_size: u64,
+    #[serde(default)]
     pub zones: Option<Vec<MemoryZoneConfig>>,
 }
 
@@ -481,6 +483,7 @@ impl MemoryConfig {
             hugepages,
             balloon,
             balloon_size: 0,
+            virtiomem_size: 0,
             zones,
         })
     }
@@ -497,6 +500,7 @@ impl Default for MemoryConfig {
             hugepages: false,
             balloon: false,
             balloon_size: 0,
+            virtiomem_size: 0,
             zones: None,
         }
     }
@@ -2001,6 +2005,7 @@ mod tests {
                 hugepages: false,
                 balloon: false,
                 balloon_size: 0,
+                virtiomem_size: 0,
                 zones: None,
             },
             kernel: Some(KernelConfig {
