@@ -522,6 +522,7 @@ mod unit_tests {
                     hugepages: false,
                     balloon: false,
                     balloon_size: 0,
+                    virtiomem_size: 0,
                 },
                 kernel: Some(KernelConfig {
                     path: PathBuf::from("/path/to/kernel"),
