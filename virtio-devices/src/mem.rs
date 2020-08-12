@@ -749,6 +749,15 @@ impl MemEpollHandler {
                     }
                     KILL_EVENT => {
                         debug!("kill_evt received, stopping epoll loop");
+                        let resp_type = MemEpollHandler::virtio_mem_unplug_all(
+                            *self.config.lock().unwrap(),
+                            &mut self.mem_state,
+                            self.host_addr,
+                            self.host_fd,
+                        );
+                        if resp_type != VIRTIO_MEM_RESP_ACK {
+                            error!("virtio_mem_unplug_all got {}", resp_type);
+                        }
                         break 'epoll;
                     }
                     PAUSE_EVENT => {
