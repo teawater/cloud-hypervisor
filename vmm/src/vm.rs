@@ -1192,6 +1192,15 @@ impl Vm {
             .map_err(|_| Error::PoisonedState)
             .map(|state| *state)
     }
+
+    /// Gets the actual size of the balloon.
+    pub fn get_balloon_actual(&self) -> Result<u64> {
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .get_balloon_actual()
+            .map_err(Error::MemoryManager)
+    }
 }
 
 impl Pausable for Vm {

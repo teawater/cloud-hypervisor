@@ -21,6 +21,7 @@ use crate::vm_memory::GuestMemory;
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompAction, SeccompFilter};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::io;
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
@@ -78,13 +79,33 @@ pub enum Error {
 }
 
 // Got from include/uapi/linux/virtio_balloon.h
+#[derive(Copy, Clone, Debug, Default, Deserialize)]
 #[repr(C, packed)]
-#[derive(Copy, Clone, Debug, Default)]
 struct VirtioBalloonConfig {
     // Number of pages host wants Guest to give up.
     num_pages: u32,
     // Number of pages we've actually got in balloon.
     actual: u32,
+}
+
+// We must explicitly implement Serialize since the structure is packed and
+// it's unsafe to borrow from a packed structure. And by default, if we derive
+// Serialize from serde, it will borrow the values from the structure.
+// That's why this implementation copies each field separately before it
+// serializes the entire structure field by field.
+impl Serialize for VirtioBalloonConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let num_pages = self.num_pages;
+        let actual = self.actual;
+
+        let mut virtio_balloon_config = serializer.serialize_struct("VirtioBalloonConfig", 8)?;
+        virtio_balloon_config.serialize_field("num_pages", &num_pages)?;
+        virtio_balloon_config.serialize_field("actual", &actual)?;
+        virtio_balloon_config.end()
+    }
 }
 
 // Safe because it only has data and has no implicit padding.
@@ -315,6 +336,8 @@ pub struct Balloon {
     avail_features: u64,
     pub acked_features: u64,
     config: Arc<Mutex<VirtioBalloonConfig>>,
+    config_actual_offset: u64,
+    config_actual_size: usize,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
@@ -330,6 +353,9 @@ impl Balloon {
 
         let mut config = VirtioBalloonConfig::default();
         config.num_pages = (size >> PAGE_SHIFT) as u32;
+        let config_actual_offset =
+            (&config.actual as *const _ as u64) - (&config as *const _ as u64);
+        let config_actual_size = std::mem::size_of_val(&config.actual);
 
         Ok(Balloon {
             id,
@@ -339,6 +365,8 @@ impl Balloon {
             avail_features,
             acked_features: 0u64,
             config: Arc::new(Mutex::new(config)),
+            config_actual_offset,
+            config_actual_size,
             queue_evts: None,
             interrupt_cb: None,
             epoll_threads: None,
@@ -350,6 +378,10 @@ impl Balloon {
 
     pub fn resize(&self, size: u64) -> Result<(), Error> {
         self.resize.work(size)
+    }
+
+    pub fn get_actual(&self) -> u64 {
+        (self.config.lock().unwrap().actual as u64) << PAGE_SHIFT
     }
 }
 
@@ -390,6 +422,20 @@ impl VirtioDevice for Balloon {
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         self.read_config_from_slice(self.config.lock().unwrap().as_slice(), offset, data);
+    }
+
+    fn write_config(&mut self, offset: u64, data: &[u8]) {
+        // The "actual" field is the only mutable field
+        if offset != self.config_actual_offset || data.len() != self.config_actual_size {
+            error!(
+                "Attempt to write to read-only field: offset {:x} length {}",
+                offset,
+                data.len()
+            );
+            return;
+        }
+
+        self.write_config_to_slice(self.config.lock().unwrap().as_mut_slice(), offset, data);
     }
 
     fn activate(

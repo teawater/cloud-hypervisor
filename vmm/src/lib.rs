@@ -457,7 +457,7 @@ impl Vmm {
         Ok(())
     }
 
-    fn vm_info(&self) -> result::Result<VmInfo, VmError> {
+    fn vm_info(&mut self) -> result::Result<VmInfo, VmError> {
         match &self.vm_config {
             Some(config) => {
                 let state = match &self.vm {
@@ -465,10 +465,13 @@ impl Vmm {
                     None => VmState::Created,
                 };
 
-                Ok(VmInfo {
-                    config: Arc::clone(config),
-                    state,
-                })
+                let config = Arc::clone(config);
+
+                if let Some(ref mut vm) = self.vm {
+                    config.lock().unwrap().memory.balloon_size = vm.get_balloon_actual()?;
+                }
+
+                Ok(VmInfo { config, state })
             }
             None => Err(VmError::VmNotCreated),
         }

@@ -142,6 +142,9 @@ pub enum Error {
     /// Failed to virtio-balloon resize
     VirtioBalloonResizeFail(virtio_devices::balloon::Error),
 
+    /// virtio-balloon device not set
+    VirtioBalloonNotSet,
+
     /// Invalid SGX EPC section size
     #[cfg(target_arch = "x86_64")]
     EpcSectionSizeInvalid,
@@ -1063,6 +1066,13 @@ impl MemoryManager {
         }
 
         Ok(balloon_size)
+    }
+
+    pub fn get_balloon_actual(&mut self) -> Result<u64, Error> {
+        if let Some(balloon) = &self.balloon {
+            return Ok(balloon.lock().unwrap().get_actual());
+        }
+        Err(Error::VirtioBalloonNotSet)
     }
 
     /// In case this function resulted in adding a new memory region to the
