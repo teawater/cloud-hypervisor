@@ -78,7 +78,7 @@ pub enum Error {
 }
 
 // Got from include/uapi/linux/virtio_balloon.h
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
 struct VirtioBalloonConfig {
     // Number of pages host wants Guest to give up.
@@ -86,6 +86,15 @@ struct VirtioBalloonConfig {
     // Number of pages we've actually got in balloon.
     actual: u32,
 }
+
+#[cfg(target_arch = "x86_64")]
+const CONFIG_ACTUAL_OFFSET: u64 = 4;
+#[cfg(target_arch = "x86_64")]
+const CONFIG_ACTUAL_SIZE: usize = 4;
+#[cfg(target_arch = "aarch64")]
+const CONFIG_ACTUAL_OFFSET: u64 = 4;
+#[cfg(target_arch = "aarch64")]
+const CONFIG_ACTUAL_SIZE: usize = 4;
 
 // Safe because it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioBalloonConfig {}
@@ -351,6 +360,10 @@ impl Balloon {
     pub fn resize(&self, size: u64) -> Result<(), Error> {
         self.resize.work(size)
     }
+
+    pub fn actual_size(&self) -> u64 {
+        (self.config.lock().unwrap().actual as u64) << PAGE_SHIFT
+    }
 }
 
 impl Drop for Balloon {
@@ -390,6 +403,20 @@ impl VirtioDevice for Balloon {
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         self.read_config_from_slice(self.config.lock().unwrap().as_slice(), offset, data);
+    }
+
+    fn write_config(&mut self, offset: u64, data: &[u8]) {
+        // The "actual" field is the only mutable field
+        if offset != CONFIG_ACTUAL_OFFSET || data.len() != CONFIG_ACTUAL_SIZE {
+            error!(
+                "Attempt to write to read-only field: offset {:x} length {}",
+                offset,
+                data.len()
+            );
+            return;
+        }
+
+        self.write_config_to_slice(self.config.lock().unwrap().as_mut_slice(), offset, data);
     }
 
     fn activate(
