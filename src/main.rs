@@ -545,6 +545,7 @@ mod unit_tests {
                     shared: false,
                     hugepages: false,
                     balloon: false,
+                    balloon_reporting: false,
                     balloon_size: 0,
                     zones: None,
                 },
