@@ -16,8 +16,8 @@ use std::num::Wrapping;
 use std::sync::atomic::{fence, Ordering};
 use std::sync::Arc;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap,
-    GuestUsize,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryMmap, GuestUsize,
 };
 
 pub const VIRTQ_DESC_F_NEXT: u16 = 0x1;
@@ -57,24 +57,24 @@ impl Display for Error {
 
 /// An iterator over a single descriptor chain.  Not to be confused with AvailIter,
 /// which iterates over the descriptor chain heads in a queue.
-pub struct DescIter<'a> {
-    next: Option<DescriptorChain<'a>>,
+pub struct DescIter {
+    next: Option<DescriptorChain>,
 }
 
-impl<'a> DescIter<'a> {
+impl DescIter {
     /// Returns an iterator that only yields the readable descriptors in the chain.
-    pub fn readable(self) -> impl Iterator<Item = DescriptorChain<'a>> {
+    pub fn readable(self) -> impl Iterator<Item = DescriptorChain> {
         self.filter(|d| !d.is_write_only())
     }
 
     /// Returns an iterator that only yields the writable descriptors in the chain.
-    pub fn writable(self) -> impl Iterator<Item = DescriptorChain<'a>> {
+    pub fn writable(self) -> impl Iterator<Item = DescriptorChain> {
         self.filter(DescriptorChain::is_write_only)
     }
 }
 
-impl<'a> Iterator for DescIter<'a> {
-    type Item = DescriptorChain<'a>;
+impl Iterator for DescIter {
+    type Item = DescriptorChain;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(current) = self.next.take() {
@@ -108,14 +108,14 @@ pub struct DescriptorHead {
 
 /// A virtio descriptor chain.
 #[derive(Clone)]
-pub struct DescriptorChain<'a> {
+pub struct DescriptorChain {
     desc_table: GuestAddress,
     table_size: u16,
     ttl: u16, // used to prevent infinite chain cycles
     iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
 
     /// Reference to guest memory
-    pub mem: &'a GuestMemoryMmap,
+    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
 
     /// Index into the descriptor table
     pub index: u16,
@@ -134,9 +134,9 @@ pub struct DescriptorChain<'a> {
     pub next: u16,
 }
 
-impl<'a> DescriptorChain<'a> {
+impl DescriptorChain {
     pub fn checked_new(
-        mem: &GuestMemoryMmap,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         desc_table: GuestAddress,
         table_size: u16,
         index: u16,
@@ -146,14 +146,17 @@ impl<'a> DescriptorChain<'a> {
             return None;
         }
 
-        let desc_head = match mem.checked_offset(desc_table, (index as usize) * 16) {
+        let desc_head = match mem
+            .memory()
+            .checked_offset(desc_table, (index as usize) * 16)
+        {
             Some(a) => a,
             None => return None,
         };
-        mem.checked_offset(desc_head, 16)?;
+        mem.memory().checked_offset(desc_head, 16)?;
 
         // These reads can't fail unless Guest memory is hopelessly broken.
-        let desc = match mem.read_obj::<Descriptor>(desc_head) {
+        let desc = match mem.memory().read_obj::<Descriptor>(desc_head) {
             Ok(ret) => ret,
             Err(_) => {
                 // TODO log address
@@ -196,11 +199,12 @@ impl<'a> DescriptorChain<'a> {
 
         let desc_head = self.addr;
         self.mem
+            .memory()
             .checked_offset(desc_head, 16)
             .ok_or(Error::GuestMemoryError)?;
 
         // These reads can't fail unless Guest memory is hopelessly broken.
-        let desc = match self.mem.read_obj::<Descriptor>(desc_head) {
+        let desc = match self.mem.memory().read_obj::<Descriptor>(desc_head) {
             Ok(ret) => ret,
             Err(_) => return Err(Error::GuestMemoryError),
         };
@@ -217,7 +221,7 @@ impl<'a> DescriptorChain<'a> {
             };
 
         let chain = DescriptorChain {
-            mem: self.mem,
+            mem: self.mem.clone(),
             desc_table: self.addr,
             table_size: (self.len / 16).try_into().unwrap(),
             ttl: (self.len / 16).try_into().unwrap(),
@@ -238,9 +242,9 @@ impl<'a> DescriptorChain<'a> {
 
     /// Returns a copy of a descriptor referencing a different GuestMemoryMmap object.
     pub fn new_from_head(
-        mem: &'a GuestMemoryMmap,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         head: DescriptorHead,
-    ) -> Result<DescriptorChain<'a>, Error> {
+    ) -> Result<DescriptorChain, Error> {
         match DescriptorChain::checked_new(
             mem,
             head.desc_table,
@@ -267,6 +271,7 @@ impl<'a> DescriptorChain<'a> {
     fn is_valid(&self) -> bool {
         !(self
             .mem
+            .memory()
             .checked_offset(self.addr, self.len as usize)
             .is_none()
             || (self.has_next() && self.next >= self.table_size))
@@ -293,10 +298,10 @@ impl<'a> DescriptorChain<'a> {
     ///
     /// Note that this is distinct from the next descriptor chain returned by `AvailIter`, which is
     /// the head of the next _available_ descriptor chain.
-    pub fn next_descriptor(&self) -> Option<DescriptorChain<'a>> {
+    pub fn next_descriptor(&self) -> Option<DescriptorChain> {
         if self.has_next() {
             DescriptorChain::checked_new(
-                self.mem,
+                self.mem.clone(),
                 self.desc_table,
                 self.table_size,
                 self.next,
@@ -312,9 +317,9 @@ impl<'a> DescriptorChain<'a> {
     }
 }
 
-impl<'a> IntoIterator for DescriptorChain<'a> {
-    type Item = DescriptorChain<'a>;
-    type IntoIter = DescIter<'a>;
+impl IntoIterator for DescriptorChain {
+    type Item = DescriptorChain;
+    type IntoIter = DescIter;
 
     fn into_iter(self) -> Self::IntoIter {
         DescIter { next: Some(self) }
@@ -322,19 +327,22 @@ impl<'a> IntoIterator for DescriptorChain<'a> {
 }
 
 /// Consuming iterator over all available descriptor chain heads in the queue.
-pub struct AvailIter<'a, 'b> {
-    mem: &'a GuestMemoryMmap,
+pub struct AvailIter<'a> {
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     desc_table: GuestAddress,
     avail_ring: GuestAddress,
     next_index: Wrapping<u16>,
     last_index: Wrapping<u16>,
     queue_size: u16,
-    next_avail: &'b mut Wrapping<u16>,
+    next_avail: &'a mut Wrapping<u16>,
     iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
 }
 
-impl<'a, 'b> AvailIter<'a, 'b> {
-    pub fn new(mem: &'a GuestMemoryMmap, q_next_avail: &'b mut Wrapping<u16>) -> AvailIter<'a, 'b> {
+impl<'a> AvailIter<'a> {
+    pub fn new(
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        q_next_avail: &'a mut Wrapping<u16>,
+    ) -> AvailIter<'a> {
         AvailIter {
             mem,
             desc_table: GuestAddress(0),
@@ -348,8 +356,8 @@ impl<'a, 'b> AvailIter<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Iterator for AvailIter<'a, 'b> {
-    type Item = DescriptorChain<'a>;
+impl<'a> Iterator for AvailIter<'a> {
+    type Item = DescriptorChain;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next_index == self.last_index {
@@ -357,12 +365,12 @@ impl<'a, 'b> Iterator for AvailIter<'a, 'b> {
         }
 
         let offset = (4 + (self.next_index.0 % self.queue_size) * 2) as usize;
-        let avail_addr = match self.mem.checked_offset(self.avail_ring, offset) {
+        let avail_addr = match self.mem.memory().checked_offset(self.avail_ring, offset) {
             Some(a) => a,
             None => return None,
         };
         // This index is checked below in checked_new
-        let desc_index: u16 = match self.mem.read_obj(avail_addr) {
+        let desc_index: u16 = match self.mem.memory().read_obj(avail_addr) {
             Ok(ret) => ret,
             Err(_) => {
                 // TODO log address
@@ -374,7 +382,7 @@ impl<'a, 'b> Iterator for AvailIter<'a, 'b> {
         self.next_index += Wrapping(1);
 
         let ret = DescriptorChain::checked_new(
-            self.mem,
+            self.mem.clone(),
             self.desc_table,
             self.queue_size,
             desc_index,
@@ -554,22 +562,22 @@ impl Queue {
     }
 
     /// A consuming iterator over all available descriptor chain heads offered by the driver.
-    pub fn iter<'a, 'b>(&'b mut self, mem: &'a GuestMemoryMmap) -> AvailIter<'a, 'b> {
+    pub fn iter(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> AvailIter {
         let queue_size = self.actual_size();
         let avail_ring = self.avail_ring;
 
-        let index_addr = match mem.checked_offset(avail_ring, 2) {
+        let index_addr = match mem.memory().checked_offset(avail_ring, 2) {
             Some(ret) => ret,
             None => {
                 // TODO log address
                 warn!("Invalid offset");
-                return AvailIter::new(mem, &mut self.next_avail);
+                return AvailIter::new(mem.clone(), &mut self.next_avail);
             }
         };
         // Note that last_index has no invalid values
-        let last_index: u16 = match mem.read_obj::<u16>(index_addr) {
+        let last_index: u16 = match mem.memory().read_obj::<u16>(index_addr) {
             Ok(ret) => ret,
-            Err(_) => return AvailIter::new(mem, &mut self.next_avail),
+            Err(_) => return AvailIter::new(mem.clone(), &mut self.next_avail),
         };
 
         AvailIter {

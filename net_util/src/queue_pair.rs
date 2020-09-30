@@ -43,8 +43,13 @@ impl TxVirtio {
         }
     }
 
-    pub fn process_desc_chain(&mut self, mem: &GuestMemoryMmap, tap: &mut Tap, queue: &mut Queue) {
-        while let Some(avail_desc) = queue.iter(&mem).next() {
+    pub fn process_desc_chain(
+        &mut self,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        tap: &mut Tap,
+        queue: &mut Queue,
+    ) {
+        while let Some(avail_desc) = queue.iter(mem.clone()).next() {
             let head_index = avail_desc.index;
             let mut read_count = 0;
             let mut next_desc = Some(avail_desc);
@@ -59,6 +64,7 @@ impl TxVirtio {
                 next_desc = desc.next_descriptor();
             }
 
+            let mem = mem.memory();
             read_count = 0;
             // Copy buffer from across multiple descriptors.
             // TODO(performance - Issue #420): change this to use `writev()` instead of `write()`
@@ -127,7 +133,7 @@ impl RxVirtio {
 
     pub fn process_desc_chain(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         mut next_desc: Option<DescriptorChain>,
         queue: &mut Queue,
     ) -> bool {
@@ -143,7 +149,7 @@ impl RxVirtio {
                     }
                     let limit = cmp::min(write_count + desc.len as usize, self.bytes_read);
                     let source_slice = &self.frame_buf[write_count..limit];
-                    let write_result = mem.write_slice(source_slice, desc.addr);
+                    let write_result = mem.memory().write_slice(source_slice, desc.addr);
 
                     match write_result {
                         Ok(_) => {
@@ -170,6 +176,7 @@ impl RxVirtio {
         self.counter_bytes += Wrapping((write_count - vnet_hdr_len()) as u64);
         self.counter_frames += Wrapping(1);
 
+        let mem = mem.memory();
         queue.add_used(&mem, head_index, write_count as u32);
         queue.update_avail_event(&mem);
 
@@ -227,9 +234,8 @@ impl NetQueuePair {
         let mem = self
             .mem
             .as_ref()
-            .ok_or(NetQueuePairError::NoMemoryConfigured)
-            .map(|m| m.memory())?;
-        let next_desc = queue.iter(&mem).next();
+            .ok_or(NetQueuePairError::NoMemoryConfigured)?;
+        let next_desc = queue.iter(mem.clone()).next();
 
         if next_desc.is_none() {
             // Queue has no available descriptors
@@ -247,7 +253,9 @@ impl NetQueuePair {
             return Ok(false);
         }
 
-        Ok(self.rx.process_desc_chain(&mem, next_desc, &mut queue))
+        Ok(self
+            .rx
+            .process_desc_chain(mem.clone(), next_desc, &mut queue))
     }
 
     fn process_rx(&mut self, queue: &mut Queue) -> Result<bool, NetQueuePairError> {
@@ -339,9 +347,9 @@ impl NetQueuePair {
         let mem = self
             .mem
             .as_ref()
-            .ok_or(NetQueuePairError::NoMemoryConfigured)
-            .map(|m| m.memory())?;
-        self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
+            .ok_or(NetQueuePairError::NoMemoryConfigured)?;
+        self.tx
+            .process_desc_chain(mem.clone(), &mut self.tap, &mut queue);
 
         self.counters
             .tx_bytes
@@ -352,6 +360,7 @@ impl NetQueuePair {
         self.tx.counter_bytes = Wrapping(0);
         self.tx.counter_frames = Wrapping(0);
 
+        let mem = mem.memory();
         Ok(queue.needs_notification(&mem, queue.next_used))
     }
 
