@@ -467,9 +467,12 @@ impl Vmm {
 
                 let config = Arc::clone(config);
 
-                let mut memory_actual_size = config.lock().unwrap().memory.total_size();
+                let mut memory_actual_size;
                 if let Some(vm) = &self.vm {
+                    memory_actual_size = vm.get_total_ram_actual()?;
                     memory_actual_size -= vm.get_balloon_actual();
+                } else {
+                    memory_actual_size = config.lock().unwrap().memory.total_size();
                 }
 
                 Ok(VmInfo {

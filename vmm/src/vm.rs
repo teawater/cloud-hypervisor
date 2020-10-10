@@ -31,7 +31,7 @@ use crate::config::{
 };
 use crate::cpu;
 use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
-use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, DEFAULT_MEMORY_ZONE};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{
@@ -225,6 +225,9 @@ pub enum Error {
 
     /// Failed setting the VmmOps interface.
     SetVmmOpsInterface(hypervisor::HypervisorVmError),
+
+    /// Failed to get zone actual
+    GetZoneActual(MemoryManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1648,6 +1651,37 @@ impl Vm {
     /// Gets the actual size of the balloon.
     pub fn get_balloon_actual(&self) -> u64 {
         self.memory_manager.lock().unwrap().get_balloon_actual()
+    }
+
+    /// Gets the total actual size of the RAM.
+    pub fn get_total_ram_actual(&self) -> Result<u64> {
+        let memory_config = &self.config.lock().unwrap().memory;
+
+        match memory_config.hotplug_method {
+            HotplugMethod::Acpi => Ok(memory_config.total_size()),
+            HotplugMethod::VirtioMem => {
+                let mut size = memory_config.size;
+                if let Some(zones) = &memory_config.zones {
+                    for zone in zones.iter() {
+                        size += self
+                            .memory_manager
+                            .lock()
+                            .unwrap()
+                            .get_zone_actual(&zone.id)
+                            .map_err(Error::GetZoneActual)?;
+                    }
+                } else {
+                    size += self
+                        .memory_manager
+                        .lock()
+                        .unwrap()
+                        .get_zone_actual(DEFAULT_MEMORY_ZONE)
+                        .map_err(Error::GetZoneActual)?;
+                }
+
+                Ok(size)
+            }
+        }
     }
 }
 
