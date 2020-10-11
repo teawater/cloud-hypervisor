@@ -349,6 +349,17 @@ components:
           type: string
       description: Virtual Machine Monitor information
 
+    VmZoneActualSize:
+      required:
+      - id
+      - size
+      type: object
+      properties:
+        id:
+          type: string
+        size:
+          type: int64
+
     VmInfo:
       required:
       - config
@@ -363,6 +374,10 @@ components:
         memory_actual_size:
           type: integer
           format: int64
+        zones_actual_size:
+          type: array
+          items:
+            $ref: '#/components/schemas/VmZoneActualSize'
       description: Virtual Machine information
 
     VmCounters:

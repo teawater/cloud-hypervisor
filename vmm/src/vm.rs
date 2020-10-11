@@ -23,6 +23,8 @@ extern crate signal_hook;
 extern crate vm_allocator;
 extern crate vm_memory;
 
+use crate::api::VmZoneActualSize;
+
 #[cfg(feature = "acpi")]
 use crate::config::NumaConfig;
 use crate::config::{
@@ -1681,6 +1683,42 @@ impl Vm {
 
                 Ok(size)
             }
+        }
+    }
+
+    /// Gets the total actual size of the RAM.
+    pub fn get_zones_actual_size(&self) -> Result<Option<Vec<VmZoneActualSize>>> {
+        let memory_config = &self.config.lock().unwrap().memory;
+
+        if memory_config.hotplug_method == HotplugMethod::VirtioMem {
+            let mut zones_actual_size = Vec::new();
+            if let Some(zones) = &memory_config.zones {
+                for zone in zones.iter() {
+                    zones_actual_size.push(VmZoneActualSize {
+                        id: zone.id.clone(),
+                        size: self
+                            .memory_manager
+                            .lock()
+                            .unwrap()
+                            .get_zone_actual(&zone.id)
+                            .map_err(Error::GetZoneActual)?,
+                    });
+                }
+            } else {
+                zones_actual_size.push(VmZoneActualSize {
+                    id: DEFAULT_MEMORY_ZONE.to_string(),
+                    size: self
+                        .memory_manager
+                        .lock()
+                        .unwrap()
+                        .get_zone_actual(DEFAULT_MEMORY_ZONE)
+                        .map_err(Error::GetZoneActual)?,
+                });
+            }
+
+            Ok(Some(zones_actual_size))
+        } else {
+            Ok(None)
         }
     }
 }

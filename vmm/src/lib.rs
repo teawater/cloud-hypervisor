@@ -468,17 +468,21 @@ impl Vmm {
                 let config = Arc::clone(config);
 
                 let mut memory_actual_size;
+                let zones_actual_size;
                 if let Some(vm) = &self.vm {
                     memory_actual_size = vm.get_total_ram_actual()?;
                     memory_actual_size -= vm.get_balloon_actual();
+                    zones_actual_size = vm.get_zones_actual_size()?;
                 } else {
                     memory_actual_size = config.lock().unwrap().memory.total_size();
+                    zones_actual_size = None;
                 }
 
                 Ok(VmInfo {
                     config,
                     state,
                     memory_actual_size,
+                    zones_actual_size,
                 })
             }
             None => Err(VmError::VmNotCreated),
