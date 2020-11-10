@@ -173,6 +173,75 @@ impl BalloonEpollHandler {
         })
     }
 
+    fn process_queue_record(&mut self) -> result::Result<(), Error> {
+        let mem = self.mem.memory();
+        let mut iter = self.queues[2].iter(&mem);
+        loop {
+            let mem = self.mem.memory();
+            let desc_index: u16;
+
+            if let Some(avail_desc) = iter.next() {
+                desc_index = avail_desc.index;
+                error!("{} {}", avail_desc.addr.0, avail_desc.len);
+                if let Ok(hva) = mem.get_host_address(avail_desc.addr) {
+                    let res = unsafe {
+                        libc::madvise(
+                            hva as *mut libc::c_void,
+                            avail_desc.len as libc::size_t,
+                            libc::MADV_DONTNEED,
+                        )
+                    };
+                    if res != 0 {
+                        return Err(Error::MadviseFail(io::Error::last_os_error()));
+                    }
+                } else {
+                    error!("Address {:?} is not available", avail_desc.addr);
+                    return Err(Error::InvalidRequest);
+                }
+            //self.queues[2].add_used(&mem, desc_index, 0);
+            //self.signal(&VirtioInterruptType::Queue, Some(&self.queues[2]))?;
+            } else {
+                error!("break");
+                break;
+            }
+        }
+        /*for mut avail_desc in self.queues[2].iter(&mem) {
+            used_desc_heads[used_count] = avail_desc.index;
+            used_count += 1;
+
+            if let Ok(hva) = mem.get_host_address(avail_desc.addr) {
+                let res = unsafe {
+                    libc::madvise(
+                        hva as *mut libc::c_void,
+                        avail_desc.len as libc::size_t,
+                        libc::MADV_DONTNEED,
+                    )
+                };
+                if res != 0 {
+                    return Err(Error::MadviseFail(io::Error::last_os_error()));
+                }
+            } else {
+                error!("Address {:?} is not available", avail_desc.addr);
+                return Err(Error::InvalidRequest);
+            }
+
+            if let Some(desc) = avail_desc.next_descriptor() {
+                avail_desc = desc;
+            } else {
+                break;
+            }
+        }
+
+        for &desc_index in &used_desc_heads[..used_count] {
+            self.queues[queue_index].add_used(&mem, desc_index, 0);
+        }
+        if used_count > 0 {
+            self.signal(&VirtioInterruptType::Queue, Some(&self.queues[queue_index]))?;
+        }*/
+
+        Ok(())
+    }
+
     fn process_queue(&mut self, ev_type: u16) -> result::Result<(), Error> {
         let queue_index = match ev_type {
             INFLATE_QUEUE_EVENT => 0,
@@ -342,7 +411,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                     if let Err(e) = reporting_queue_evt.read() {
                         error!("Failed to get reporting queue event: {:?}", e);
                         return true;
-                    } else if let Err(e) = self.process_queue(ev_type) {
+                    } else if let Err(e) = self.process_queue_record() {
                         error!("Failed to signal used reporting queue: {:?}", e);
                         return true;
                     }
