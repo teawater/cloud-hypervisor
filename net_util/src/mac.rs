@@ -82,7 +82,7 @@ impl MacAddr {
     pub fn local_random() -> MacAddr {
         // Generate a fully random MAC
         let mut random_bytes = [0u8; MAC_ADDR_LEN];
-        unsafe {
+        /*unsafe {
             // Man page says this function will not be interrupted by a signal
             // for requests less than 256 bytes
             if libc::getrandom(
@@ -96,10 +96,15 @@ impl MacAddr {
                     std::io::Error::last_os_error()
                 )
             }
-        };
+        };*/
 
         // Set the first byte to make the OUI a locally administered OUI
         random_bytes[0] = 0x2e;
+        random_bytes[1] = 0x3e;
+        random_bytes[2] = 0x4e;
+        random_bytes[3] = 0x5e;
+        random_bytes[4] = 0x6e;
+        random_bytes[5] = 0x7e;
 
         MacAddr {
             bytes: random_bytes,
